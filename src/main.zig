@@ -1,0 +1,266 @@
+const std = @import("std");
+const http_client = @import("http_client.zig");
+
+const NOTION_API_BASE = "https://api.notion.com/v1";
+const NOTION_VERSION = "2022-06-28";
+
+const NotionError = error{
+    InvalidPageId,
+    MissingApiToken,
+    ApiRequestFailed,
+    InvalidResponse,
+};
+
+fn printUsage(program_name: []const u8) void {
+    std.debug.print("Usage: {s} <page-id-or-url>\n\n", .{program_name});
+    std.debug.print("Environment Variables:\n", .{});
+    std.debug.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{});
+    std.debug.print("Examples:\n", .{});
+    std.debug.print("  {s} abc123def456\n", .{program_name});
+    std.debug.print("  {s} https://www.notion.so/My-Page-abc123def456\n", .{program_name});
+}
+
+fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
+    // If input looks like a URL, extract the ID from it
+    if (std.mem.indexOf(u8, input, "notion.so/") != null) {
+        // Find the last segment after the last '-' which should be the page ID
+        var iter = std.mem.splitBackwardsScalar(u8, input, '-');
+        if (iter.next()) |last_segment| {
+            // Remove query parameters if present
+            var query_iter = std.mem.splitScalar(u8, last_segment, '?');
+            if (query_iter.next()) |id_part| {
+                return try allocator.dupe(u8, id_part);
+            }
+        }
+        return NotionError.InvalidPageId;
+    }
+
+    // Otherwise, assume it's already a page ID
+    return try allocator.dupe(u8, input);
+}
+
+fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
+    // Remove any existing hyphens
+    var cleaned: std.ArrayList(u8) = .{};
+    defer cleaned.deinit(allocator);
+
+    for (page_id) |c| {
+        if (c != '-' and c != ' ') {
+            try cleaned.append(allocator, c);
+        }
+    }
+
+    // Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    const clean_id = cleaned.items;
+    if (clean_id.len != 32) {
+        return NotionError.InvalidPageId;
+    }
+
+    var formatted: std.ArrayList(u8) = .{};
+    defer formatted.deinit(allocator);
+
+    try formatted.appendSlice(allocator, clean_id[0..8]);
+    try formatted.append(allocator, '-');
+    try formatted.appendSlice(allocator, clean_id[8..12]);
+    try formatted.append(allocator, '-');
+    try formatted.appendSlice(allocator, clean_id[12..16]);
+    try formatted.append(allocator, '-');
+    try formatted.appendSlice(allocator, clean_id[16..20]);
+    try formatted.append(allocator, '-');
+    try formatted.appendSlice(allocator, clean_id[20..32]);
+
+    return formatted.toOwnedSlice(allocator);
+}
+
+fn fetchPageBlocks(
+    allocator: std.mem.Allocator,
+    api_token: []const u8,
+    page_id: []const u8,
+) ![]const u8 {
+    const url = try std.fmt.allocPrint(
+        allocator,
+        "{s}/blocks/{s}/children",
+        .{ NOTION_API_BASE, page_id },
+    );
+    defer allocator.free(url);
+
+    // Create HTTP client
+    var client = http_client.HttpClient.init(allocator);
+    defer client.deinit();
+
+    // Prepare authorization header
+    const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_token});
+    defer allocator.free(auth_header);
+
+    // Prepare extra headers for Notion API
+    const extra_headers = [_]std.http.Header{
+        .{ .name = "Notion-Version", .value = NOTION_VERSION },
+    };
+
+    // Make the GET request with custom headers
+    var response = try client.getWithHeaders(url, auth_header, &extra_headers);
+    defer response.deinit();
+
+    if (response.status_code != 200) {
+        std.debug.print("Error: API returned status {}\n", .{response.status_code});
+        std.debug.print("Response body: {s}\n", .{response.body});
+        return NotionError.ApiRequestFailed;
+    }
+
+    // Duplicate the body since response.deinit will free it
+    return try allocator.dupe(u8, response.body);
+}
+
+fn printBlockContent(block: std.json.Value, indent: usize) void {
+    const indent_str = " " ** 80;
+
+    // Print indentation
+    if (indent < 80) {
+        std.debug.print("{s}", .{indent_str[0..indent]});
+    }
+
+    const block_obj = block.object;
+    const block_type = block_obj.get("type") orelse return;
+
+    if (block_type != .string) return;
+    const type_str = block_type.string;
+
+    // Handle different block types
+    if (std.mem.eql(u8, type_str, "paragraph")) {
+        if (block_obj.get("paragraph")) |para| {
+            if (para.object.get("rich_text")) |rich_text| {
+                if (rich_text == .array) {
+                    for (rich_text.array.items) |text_item| {
+                        if (text_item.object.get("plain_text")) |plain_text| {
+                            if (plain_text == .string) {
+                                std.debug.print("{s}", .{plain_text.string});
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "heading_1")) {
+        std.debug.print("# ", .{});
+        if (block_obj.get("heading_1")) |heading| {
+            printRichText(heading.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "heading_2")) {
+        std.debug.print("## ", .{});
+        if (block_obj.get("heading_2")) |heading| {
+            printRichText(heading.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "heading_3")) {
+        std.debug.print("### ", .{});
+        if (block_obj.get("heading_3")) |heading| {
+            printRichText(heading.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "bulleted_list_item")) {
+        std.debug.print("- ", .{});
+        if (block_obj.get("bulleted_list_item")) |item| {
+            printRichText(item.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "numbered_list_item")) {
+        std.debug.print("1. ", .{});
+        if (block_obj.get("numbered_list_item")) |item| {
+            printRichText(item.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "code")) {
+        if (block_obj.get("code")) |code| {
+            std.debug.print("```\n", .{});
+            printRichText(code.object.get("rich_text"));
+            std.debug.print("\n```\n", .{});
+        }
+    } else if (std.mem.eql(u8, type_str, "quote")) {
+        std.debug.print("> ", .{});
+        if (block_obj.get("quote")) |quote| {
+            printRichText(quote.object.get("rich_text"));
+        }
+        std.debug.print("\n", .{});
+    } else if (std.mem.eql(u8, type_str, "divider")) {
+        std.debug.print("--------------------\n", .{});
+    } else {
+        std.debug.print("[{s}]\n", .{type_str});
+    }
+}
+
+fn printRichText(rich_text_opt: ?std.json.Value) void {
+    const rich_text = rich_text_opt orelse return;
+    if (rich_text != .array) return;
+
+    for (rich_text.array.items) |text_item| {
+        if (text_item.object.get("plain_text")) |plain_text| {
+            if (plain_text == .string) {
+                std.debug.print("{s}", .{plain_text.string});
+            }
+        }
+    }
+}
+
+pub fn main() !void {
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    const allocator = gpa.allocator();
+
+    const args = try std.process.argsAlloc(allocator);
+    defer std.process.argsFree(allocator, args);
+
+    if (args.len < 2) {
+        printUsage(args[0]);
+        std.process.exit(1);
+    }
+
+    const page_input = args[1];
+
+    // Get API token from environment
+    const api_token = std.process.getEnvVarOwned(allocator, "NOTION_API_TOKEN") catch {
+        std.debug.print("Error: NOTION_API_TOKEN environment variable is not set\n\n", .{});
+        printUsage(args[0]);
+        return NotionError.MissingApiToken;
+    };
+    defer allocator.free(api_token);
+
+    // Extract and format page ID
+    const page_id = try extractPageId(allocator, page_input);
+    defer allocator.free(page_id);
+
+    const formatted_id = try formatPageId(allocator, page_id);
+    defer allocator.free(formatted_id);
+
+    std.debug.print("Fetching page: {s}\n\n", .{formatted_id});
+
+    // Fetch page blocks
+    const response = try fetchPageBlocks(allocator, api_token, formatted_id);
+    defer allocator.free(response);
+
+    if (response.len == 0) {
+        std.debug.print("Error: Empty response from API\n", .{});
+        return NotionError.InvalidResponse;
+    }
+
+    // Parse JSON response
+    const parsed = try std.json.parseFromSlice(
+        std.json.Value,
+        allocator,
+        response,
+        .{},
+    );
+    defer parsed.deinit();
+
+    const root = parsed.value;
+    if (root.object.get("results")) |results| {
+        if (results == .array) {
+            for (results.array.items) |block| {
+                printBlockContent(block, 0);
+            }
+        }
+    } else {
+        std.debug.print("No content found or invalid response format\n", .{});
+    }
+}
