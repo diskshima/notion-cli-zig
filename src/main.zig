@@ -113,21 +113,18 @@ fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
     return formatted.toOwnedSlice(allocator);
 }
 
-fn fetchPageBlocks(
+fn fetchChildren(
+    client: *http_client.HttpClient,
     allocator: std.mem.Allocator,
     api_token: []const u8,
-    page_id: []const u8,
+    block_id: []const u8,
 ) ![]const u8 {
     const url = try std.fmt.allocPrint(
         allocator,
         "{s}/blocks/{s}/children",
-        .{ NOTION_API_BASE, page_id },
+        .{ NOTION_API_BASE, block_id },
     );
     defer allocator.free(url);
-
-    // Create HTTP client
-    var client = http_client.HttpClient.init(allocator);
-    defer client.deinit();
 
     // Prepare authorization header
     const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_token});
@@ -153,7 +150,13 @@ fn fetchPageBlocks(
     return try allocator.dupe(u8, response.body);
 }
 
-fn printBlockContent(block: std.json.Value, indent: usize) void {
+fn printBlockContent(
+    client: *http_client.HttpClient,
+    allocator: std.mem.Allocator,
+    api_token: []const u8,
+    block: std.json.Value,
+    indent: usize,
+) !void {
     const writer = std.fs.File.stdout().deprecatedWriter();
     const indent_str = " " ** 80;
 
@@ -183,53 +186,85 @@ fn printBlockContent(block: std.json.Value, indent: usize) void {
                 }
             }
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_1")) {
         writer.print("# ", .{}) catch {};
         if (block_obj.get("heading_1")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_2")) {
         writer.print("## ", .{}) catch {};
         if (block_obj.get("heading_2")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_3")) {
         writer.print("### ", .{}) catch {};
         if (block_obj.get("heading_3")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "bulleted_list_item")) {
         writer.print("- ", .{}) catch {};
         if (block_obj.get("bulleted_list_item")) |item| {
             printRichText(item.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "numbered_list_item")) {
         writer.print("1. ", .{}) catch {};
         if (block_obj.get("numbered_list_item")) |item| {
             printRichText(item.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "code")) {
         if (block_obj.get("code")) |code| {
             writer.print("```\n", .{}) catch {};
             printRichText(code.object.get("rich_text"));
-            writer.print("\n```\n", .{}) catch {};
+            writer.print("\n```", .{}) catch {};
         }
     } else if (std.mem.eql(u8, type_str, "quote")) {
         writer.print("> ", .{}) catch {};
         if (block_obj.get("quote")) |quote| {
             printRichText(quote.object.get("rich_text"));
         }
-        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "divider")) {
-        writer.print("--------------------\n", .{}) catch {};
+        writer.print("--------------------", .{}) catch {};
+    } else if (std.mem.eql(u8, type_str, "bookmark")) {
+        if (block_obj.get("bookmark")) |bookmark| {
+             if (bookmark.object.get("url")) |url| {
+                 if (url == .string) {
+                     writer.print("[Bookmark: {s}]", .{url.string}) catch {};
+                 }
+             }
+        }
     } else {
-        writer.print("[{s}]\n", .{type_str}) catch {};
+        writer.print("[{s}]", .{type_str}) catch {};
+    }
+    writer.print("\n", .{}) catch {};
+
+    // Check for children
+    if (block_obj.get("has_children")) |has_children| {
+        if (has_children == .bool and has_children.bool) {
+            if (block_obj.get("id")) |id_val| {
+                if (id_val == .string) {
+                    const block_id = id_val.string;
+                    const response = try fetchChildren(client, allocator, api_token, block_id);
+                    defer allocator.free(response);
+
+                    const parsed = try std.json.parseFromSlice(
+                        std.json.Value,
+                        allocator,
+                        response,
+                        .{},
+                    );
+                    defer parsed.deinit();
+
+                    const root = parsed.value;
+                    if (root.object.get("results")) |results| {
+                        if (results == .array) {
+                            for (results.array.items) |child| {
+                                try printBlockContent(client, allocator, api_token, child, indent + 2);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -279,8 +314,12 @@ pub fn main() !void {
     const formatted_id = try formatPageId(allocator, page_id);
     defer allocator.free(formatted_id);
 
+    // Create HTTP client
+    var client = http_client.HttpClient.init(allocator);
+    defer client.deinit();
+
     // Fetch page blocks
-    const response = try fetchPageBlocks(allocator, api_token, formatted_id);
+    const response = try fetchChildren(&client, allocator, api_token, formatted_id);
     defer allocator.free(response);
 
     if (response.len == 0) {
@@ -301,7 +340,7 @@ pub fn main() !void {
     if (root.object.get("results")) |results| {
         if (results == .array) {
             for (results.array.items) |block| {
-                printBlockContent(block, 0);
+                try printBlockContent(&client, allocator, api_token, block, 0);
             }
         }
     } else {

@@ -98,7 +98,7 @@ pub const HttpClient = struct {
         // Create request options
         const request_options = std.http.Client.RequestOptions{
             .extra_headers = headers_buffer[0..headers_count],
-            .keep_alive = false,
+            .keep_alive = true,
             .version = .@"HTTP/1.1",
         };
 
