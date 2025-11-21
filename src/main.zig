@@ -74,7 +74,7 @@ fn findPageIdInPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
 }
 
 fn printUsage(program_name: []const u8) void {
-    const writer = std.fs.File.stderr().deprecatedWriter();
+    const writer = std.io.getStdErr().writer();
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
     writer.print("Environment Variables:\n", .{}) catch {};
     writer.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{}) catch {};
@@ -148,7 +148,7 @@ fn fetchChildren(
     defer response.deinit();
 
     if (response.status_code != 200) {
-        const writer = std.fs.File.stderr().deprecatedWriter();
+        const writer = std.io.getStdErr().writer();
         writer.print("Error: API returned status {}\n", .{response.status_code}) catch {};
         writer.print("Response body: {s}\n", .{response.body}) catch {};
         return NotionError.ApiRequestFailed;
@@ -165,7 +165,7 @@ fn printBlockContent(
     block: std.json.Value,
     indent: usize,
 ) !void {
-    const writer = std.fs.File.stdout().deprecatedWriter();
+    const writer = std.io.getStdOut().writer();
     const indent_str = " " ** MAX_INDENT;
 
     // Print indentation
@@ -267,7 +267,7 @@ fn printBlockContent(
 }
 
 fn printRichText(rich_text_opt: ?std.json.Value) void {
-    const writer = std.fs.File.stdout().deprecatedWriter();
+    const writer = std.io.getStdOut().writer();
     const rich_text = rich_text_opt orelse return;
     if (rich_text != .array) return;
 
@@ -285,7 +285,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const writer = std.fs.File.stdout().deprecatedWriter();
+    const writer = std.io.getStdOut().writer();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
