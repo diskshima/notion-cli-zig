@@ -1,12 +1,24 @@
 const std = @import("std");
 const http_client = @import("http_client.zig");
 
-const NOTION_API_BASE = "https://api.notion.com/v1";
-const NOTION_VERSION = "2022-06-28";
-
 const PAGE_ID_LENGTH = 32;
 const MAX_INDENT = 80;
 const INDENT_INCREMENT = 2;
+
+const NotionConfig = struct {
+    api_base: []const u8 = "https://api.notion.com/v1",
+    api_version: []const u8 = "2022-06-28",
+
+    fn buildBlockUrl(self: NotionConfig, allocator: std.mem.Allocator, block_id: []const u8) ![]const u8 {
+        return std.fmt.allocPrint(
+            allocator,
+            "{s}/blocks/{s}/children",
+            .{ self.api_base, block_id },
+        );
+    }
+};
+
+const notion_config = NotionConfig{};
 
 const NotionError = error{
     InvalidPageId,
@@ -127,11 +139,7 @@ fn fetchChildren(
     api_token: []const u8,
     block_id: []const u8,
 ) ![]const u8 {
-    const url = try std.fmt.allocPrint(
-        allocator,
-        "{s}/blocks/{s}/children",
-        .{ NOTION_API_BASE, block_id },
-    );
+    const url = try notion_config.buildBlockUrl(allocator, block_id);
     defer allocator.free(url);
 
     // Prepare authorization header
@@ -140,7 +148,7 @@ fn fetchChildren(
 
     // Prepare extra headers for Notion API
     const extra_headers = [_]std.http.Header{
-        .{ .name = "Notion-Version", .value = NOTION_VERSION },
+        .{ .name = "Notion-Version", .value = notion_config.api_version },
     };
 
     // Make the GET request with custom headers
