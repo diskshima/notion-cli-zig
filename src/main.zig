@@ -208,69 +208,17 @@ fn printBlockContent(
 
     // Handle different block types
     switch (block_type) {
-        .paragraph => {
-            if (block_obj.get("paragraph")) |para| {
-                printRichText(para.object.get("rich_text"));
-            }
-        },
-        .heading_1 => {
-            writer.print("# ", .{}) catch {};
-            if (block_obj.get("heading_1")) |heading| {
-                printRichText(heading.object.get("rich_text"));
-            }
-        },
-        .heading_2 => {
-            writer.print("## ", .{}) catch {};
-            if (block_obj.get("heading_2")) |heading| {
-                printRichText(heading.object.get("rich_text"));
-            }
-        },
-        .heading_3 => {
-            writer.print("### ", .{}) catch {};
-            if (block_obj.get("heading_3")) |heading| {
-                printRichText(heading.object.get("rich_text"));
-            }
-        },
-        .bulleted_list_item => {
-            writer.print("- ", .{}) catch {};
-            if (block_obj.get("bulleted_list_item")) |item| {
-                printRichText(item.object.get("rich_text"));
-            }
-        },
-        .numbered_list_item => {
-            writer.print("1. ", .{}) catch {};
-            if (block_obj.get("numbered_list_item")) |item| {
-                printRichText(item.object.get("rich_text"));
-            }
-        },
-        .code => {
-            if (block_obj.get("code")) |code| {
-                writer.print("```\n", .{}) catch {};
-                printRichText(code.object.get("rich_text"));
-                writer.print("\n```", .{}) catch {};
-            }
-        },
-        .quote => {
-            writer.print("> ", .{}) catch {};
-            if (block_obj.get("quote")) |quote| {
-                printRichText(quote.object.get("rich_text"));
-            }
-        },
-        .divider => {
-            writer.print("--------------------", .{}) catch {};
-        },
-        .bookmark => {
-            if (block_obj.get("bookmark")) |bookmark| {
-                if (bookmark.object.get("url")) |url| {
-                    if (url == .string) {
-                        writer.print("[Bookmark: {s}]", .{url.string}) catch {};
-                    }
-                }
-            }
-        },
-        .unsupported => {
-            writer.print("[{s}]", .{type_str}) catch {};
-        },
+        .paragraph => handleRichTextBlock(writer, block_obj, "paragraph", ""),
+        .heading_1 => handleRichTextBlock(writer, block_obj, "heading_1", "# "),
+        .heading_2 => handleRichTextBlock(writer, block_obj, "heading_2", "## "),
+        .heading_3 => handleRichTextBlock(writer, block_obj, "heading_3", "### "),
+        .bulleted_list_item => handleRichTextBlock(writer, block_obj, "bulleted_list_item", "- "),
+        .numbered_list_item => handleRichTextBlock(writer, block_obj, "numbered_list_item", "1. "),
+        .quote => handleRichTextBlock(writer, block_obj, "quote", "> "),
+        .code => handleCodeBlock(writer, block_obj),
+        .divider => writer.print("--------------------", .{}) catch {},
+        .bookmark => handleBookmarkBlock(writer, block_obj),
+        .unsupported => writer.print("[{s}]", .{type_str}) catch {},
     }
     writer.print("\n", .{}) catch {};
 
@@ -300,6 +248,31 @@ fn printBlockContent(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+fn handleRichTextBlock(writer: anytype, block_obj: std.json.ObjectMap, block_type_str: []const u8, prefix: []const u8) void {
+    writer.print("{s}", .{prefix}) catch {};
+    if (block_obj.get(block_type_str)) |block_data| {
+        printRichText(block_data.object.get("rich_text"));
+    }
+}
+
+fn handleCodeBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
+    if (block_obj.get("code")) |code| {
+        writer.print("```\n", .{}) catch {};
+        printRichText(code.object.get("rich_text"));
+        writer.print("\n```", .{}) catch {};
+    }
+}
+
+fn handleBookmarkBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
+    if (block_obj.get("bookmark")) |bookmark| {
+        if (bookmark.object.get("url")) |url| {
+            if (url == .string) {
+                writer.print("[Bookmark: {s}]", .{url.string}) catch {};
             }
         }
     }
