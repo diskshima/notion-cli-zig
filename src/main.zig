@@ -25,6 +25,54 @@ fn isHexString(s: []const u8) bool {
     return true;
 }
 
+fn isNotionUrl(input: []const u8) bool {
+    return std.mem.indexOf(u8, input, "notion.so/") != null;
+}
+
+fn cleanUrlPath(input: []const u8) ![]const u8 {
+    const notion_prefix = "notion.so/";
+    const prefix_idx = std.mem.indexOf(u8, input, notion_prefix) orelse return NotionError.InvalidPageId;
+    const after_prefix = input[prefix_idx + notion_prefix.len ..];
+
+    // Remove query parameters if present
+    var query_iter = std.mem.splitScalar(u8, after_prefix, '?');
+    const id_part = query_iter.next() orelse return NotionError.InvalidPageId;
+
+    // Remove trailing slash if present
+    var end = id_part.len;
+    while (end > 0 and id_part[end - 1] == '/') {
+        end -= 1;
+    }
+
+    return id_part[0..end];
+}
+
+fn findPageIdInPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
+    // The format could be:
+    // 1. "workspace-name/2a9f69455b3080c88458f7ff164a5455" (with slash and workspace)
+    // 2. "workspace-name-2a9f69455b3080c88458f7ff164a5455" (with hyphens)
+    // 3. "2a9f69455b3080c88458f7ff164a5455" (just ID)
+
+    // First, try splitting by slash (workspace/id format)
+    if (std.mem.indexOf(u8, path, "/")) |slash_idx| {
+        const potential_id = path[slash_idx + 1 ..];
+        if (potential_id.len == PAGE_ID_LENGTH) {
+            return try allocator.dupe(u8, potential_id);
+        }
+    }
+
+    // Otherwise, look for the last segment that looks like a 32-char hex ID
+    var segments = std.mem.splitBackwardsScalar(u8, path, '-');
+    while (segments.next()) |segment| {
+        if (segment.len == PAGE_ID_LENGTH and isHexString(segment)) {
+            return try allocator.dupe(u8, segment);
+        }
+    }
+
+    // If no 32-char segment found, return the whole thing
+    return try allocator.dupe(u8, path);
+}
+
 fn printUsage(program_name: []const u8) void {
     const writer = std.fs.File.stderr().deprecatedWriter();
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
@@ -36,52 +84,10 @@ fn printUsage(program_name: []const u8) void {
 }
 
 fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
-    // If input looks like a URL, extract the ID from it
-    if (std.mem.indexOf(u8, input, "notion.so/") != null) {
-        // Find the content after "notion.so/"
-        const notion_prefix = "notion.so/";
-        if (std.mem.indexOf(u8, input, notion_prefix)) |prefix_idx| {
-            const after_prefix = input[prefix_idx + notion_prefix.len ..];
-            // Remove query parameters if present
-            var query_iter = std.mem.splitScalar(u8, after_prefix, '?');
-            if (query_iter.next()) |id_part| {
-                // Remove trailing slash if present
-                var end = id_part.len;
-                while (end > 0 and id_part[end - 1] == '/') {
-                    end -= 1;
-                }
-                const clean_id = id_part[0..end];
-
-                // The format could be:
-                // 1. "workspace-name/2a9f69455b3080c88458f7ff164a5455" (with slash and workspace)
-                // 2. "workspace-name-2a9f69455b3080c88458f7ff164a5455" (with hyphens)
-                // 3. "2a9f69455b3080c88458f7ff164a5455" (just ID)
-
-                // First, try splitting by slash (workspace/id format)
-                if (std.mem.indexOf(u8, clean_id, "/")) |slash_idx| {
-                    const potential_id = clean_id[slash_idx + 1 ..];
-                    if (potential_id.len == PAGE_ID_LENGTH) {
-                        return try allocator.dupe(u8, potential_id);
-                    }
-                }
-
-                // Otherwise, look for the last segment that looks like a 32-char hex ID
-                var segments = std.mem.splitBackwardsScalar(u8, clean_id, '-');
-                while (segments.next()) |segment| {
-                    // Check if this could be a 32-char hex string (page ID)
-                    if (segment.len == PAGE_ID_LENGTH and isHexString(segment)) {
-                        return try allocator.dupe(u8, segment);
-                    }
-                }
-
-                // If no 32-char segment found, return the whole thing
-                return try allocator.dupe(u8, clean_id);
-            }
-        }
-        return NotionError.InvalidPageId;
+    if (isNotionUrl(input)) {
+        const clean_path = try cleanUrlPath(input);
+        return try findPageIdInPath(allocator, clean_path);
     }
-
-    // Otherwise, assume it's already a page ID
     return try allocator.dupe(u8, input);
 }
 
