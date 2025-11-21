@@ -12,12 +12,13 @@ const NotionError = error{
 };
 
 fn printUsage(program_name: []const u8) void {
-    std.debug.print("Usage: {s} <page-id-or-url>\n\n", .{program_name});
-    std.debug.print("Environment Variables:\n", .{});
-    std.debug.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{});
-    std.debug.print("Examples:\n", .{});
-    std.debug.print("  {s} abc123def456\n", .{program_name});
-    std.debug.print("  {s} https://www.notion.so/My-Page-abc123def456\n", .{program_name});
+    const writer = std.fs.File.stderr().deprecatedWriter();
+    writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
+    writer.print("Environment Variables:\n", .{}) catch {};
+    writer.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{}) catch {};
+    writer.print("Examples:\n", .{}) catch {};
+    writer.print("  {s} abc123def456\n", .{program_name}) catch {};
+    writer.print("  {s} https://www.notion.so/My-Page-abc123def456\n", .{program_name}) catch {};
 }
 
 fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
@@ -142,8 +143,9 @@ fn fetchPageBlocks(
     defer response.deinit();
 
     if (response.status_code != 200) {
-        std.debug.print("Error: API returned status {}\n", .{response.status_code});
-        std.debug.print("Response body: {s}\n", .{response.body});
+        const writer = std.fs.File.stderr().deprecatedWriter();
+        writer.print("Error: API returned status {}\n", .{response.status_code}) catch {};
+        writer.print("Response body: {s}\n", .{response.body}) catch {};
         return NotionError.ApiRequestFailed;
     }
 
@@ -152,11 +154,12 @@ fn fetchPageBlocks(
 }
 
 fn printBlockContent(block: std.json.Value, indent: usize) void {
+    const writer = std.fs.File.stdout().deprecatedWriter();
     const indent_str = " " ** 80;
 
     // Print indentation
     if (indent < 80) {
-        std.debug.print("{s}", .{indent_str[0..indent]});
+        writer.print("{s}", .{indent_str[0..indent]}) catch {};
     }
 
     const block_obj = block.object;
@@ -173,71 +176,72 @@ fn printBlockContent(block: std.json.Value, indent: usize) void {
                     for (rich_text.array.items) |text_item| {
                         if (text_item.object.get("plain_text")) |plain_text| {
                             if (plain_text == .string) {
-                                std.debug.print("{s}", .{plain_text.string});
+                                writer.print("{s}", .{plain_text.string}) catch {};
                             }
                         }
                     }
                 }
             }
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_1")) {
-        std.debug.print("# ", .{});
+        writer.print("# ", .{}) catch {};
         if (block_obj.get("heading_1")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_2")) {
-        std.debug.print("## ", .{});
+        writer.print("## ", .{}) catch {};
         if (block_obj.get("heading_2")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "heading_3")) {
-        std.debug.print("### ", .{});
+        writer.print("### ", .{}) catch {};
         if (block_obj.get("heading_3")) |heading| {
             printRichText(heading.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "bulleted_list_item")) {
-        std.debug.print("- ", .{});
+        writer.print("- ", .{}) catch {};
         if (block_obj.get("bulleted_list_item")) |item| {
             printRichText(item.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "numbered_list_item")) {
-        std.debug.print("1. ", .{});
+        writer.print("1. ", .{}) catch {};
         if (block_obj.get("numbered_list_item")) |item| {
             printRichText(item.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "code")) {
         if (block_obj.get("code")) |code| {
-            std.debug.print("```\n", .{});
+            writer.print("```\n", .{}) catch {};
             printRichText(code.object.get("rich_text"));
-            std.debug.print("\n```\n", .{});
+            writer.print("\n```\n", .{}) catch {};
         }
     } else if (std.mem.eql(u8, type_str, "quote")) {
-        std.debug.print("> ", .{});
+        writer.print("> ", .{}) catch {};
         if (block_obj.get("quote")) |quote| {
             printRichText(quote.object.get("rich_text"));
         }
-        std.debug.print("\n", .{});
+        writer.print("\n", .{}) catch {};
     } else if (std.mem.eql(u8, type_str, "divider")) {
-        std.debug.print("--------------------\n", .{});
+        writer.print("--------------------\n", .{}) catch {};
     } else {
-        std.debug.print("[{s}]\n", .{type_str});
+        writer.print("[{s}]\n", .{type_str}) catch {};
     }
 }
 
 fn printRichText(rich_text_opt: ?std.json.Value) void {
+    const writer = std.fs.File.stdout().deprecatedWriter();
     const rich_text = rich_text_opt orelse return;
     if (rich_text != .array) return;
 
     for (rich_text.array.items) |text_item| {
         if (text_item.object.get("plain_text")) |plain_text| {
             if (plain_text == .string) {
-                std.debug.print("{s}", .{plain_text.string});
+                writer.print("{s}", .{plain_text.string}) catch {};
             }
         }
     }
@@ -247,6 +251,8 @@ pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
+
+    const writer = std.fs.File.stdout().deprecatedWriter();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -260,7 +266,7 @@ pub fn main() !void {
 
     // Get API token from environment
     const api_token = std.process.getEnvVarOwned(allocator, "NOTION_API_TOKEN") catch {
-        std.debug.print("Error: NOTION_API_TOKEN environment variable is not set\n\n", .{});
+        writer.print("Error: NOTION_API_TOKEN environment variable is not set\n\n", .{}) catch {};
         printUsage(args[0]);
         return NotionError.MissingApiToken;
     };
@@ -273,14 +279,12 @@ pub fn main() !void {
     const formatted_id = try formatPageId(allocator, page_id);
     defer allocator.free(formatted_id);
 
-    std.debug.print("Fetching page: {s}\n\n", .{formatted_id});
-
     // Fetch page blocks
     const response = try fetchPageBlocks(allocator, api_token, formatted_id);
     defer allocator.free(response);
 
     if (response.len == 0) {
-        std.debug.print("Error: Empty response from API\n", .{});
+        writer.print("Error: Empty response from API\n", .{}) catch {};
         return NotionError.InvalidResponse;
     }
 
@@ -301,6 +305,6 @@ pub fn main() !void {
             }
         }
     } else {
-        std.debug.print("No content found or invalid response format\n", .{});
+        writer.print("No content found or invalid response format\n", .{}) catch {};
     }
 }
