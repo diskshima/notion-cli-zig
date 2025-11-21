@@ -103,6 +103,23 @@ fn findPageIdInPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
     return try allocator.dupe(u8, path);
 }
 
+fn printApiError(status_code: u16, response_body: []const u8) void {
+    const writer = std.io.getStdErr().writer();
+    writer.print("Error: Notion API request failed with status {}\n", .{status_code}) catch {};
+
+    // Provide helpful messages for common status codes
+    switch (status_code) {
+        401 => writer.print("  Unauthorized: Check your NOTION_API_TOKEN\n", .{}) catch {},
+        403 => writer.print("  Forbidden: The integration may not have access to this page\n", .{}) catch {},
+        404 => writer.print("  Not Found: The page or block does not exist\n", .{}) catch {},
+        429 => writer.print("  Rate Limited: Too many requests, please try again later\n", .{}) catch {},
+        500...599 => writer.print("  Server Error: Notion API is experiencing issues\n", .{}) catch {},
+        else => {},
+    }
+
+    writer.print("Response: {s}\n", .{response_body}) catch {};
+}
+
 fn printUsage(program_name: []const u8) void {
     const writer = std.io.getStdErr().writer();
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
@@ -174,9 +191,7 @@ fn fetchChildren(
     defer response.deinit();
 
     if (response.status_code != 200) {
-        const writer = std.io.getStdErr().writer();
-        writer.print("Error: API returned status {}\n", .{response.status_code}) catch {};
-        writer.print("Response body: {s}\n", .{response.body}) catch {};
+        printApiError(response.status_code, response.body);
         return NotionError.ApiRequestFailed;
     }
 
