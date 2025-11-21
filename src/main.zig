@@ -176,17 +176,7 @@ fn printBlockContent(
     // Handle different block types
     if (std.mem.eql(u8, type_str, "paragraph")) {
         if (block_obj.get("paragraph")) |para| {
-            if (para.object.get("rich_text")) |rich_text| {
-                if (rich_text == .array) {
-                    for (rich_text.array.items) |text_item| {
-                        if (text_item.object.get("plain_text")) |plain_text| {
-                            if (plain_text == .string) {
-                                writer.print("{s}", .{plain_text.string}) catch {};
-                            }
-                        }
-                    }
-                }
-            }
+            printRichText(para.object.get("rich_text"));
         }
     } else if (std.mem.eql(u8, type_str, "heading_1")) {
         writer.print("# ", .{}) catch {};
