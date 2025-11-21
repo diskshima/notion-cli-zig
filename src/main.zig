@@ -23,13 +23,53 @@ fn printUsage(program_name: []const u8) void {
 fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
     // If input looks like a URL, extract the ID from it
     if (std.mem.indexOf(u8, input, "notion.so/") != null) {
-        // Find the last segment after the last '-' which should be the page ID
-        var iter = std.mem.splitBackwardsScalar(u8, input, '-');
-        if (iter.next()) |last_segment| {
+        // Find the content after "notion.so/"
+        const notion_prefix = "notion.so/";
+        if (std.mem.indexOf(u8, input, notion_prefix)) |prefix_idx| {
+            const after_prefix = input[prefix_idx + notion_prefix.len ..];
             // Remove query parameters if present
-            var query_iter = std.mem.splitScalar(u8, last_segment, '?');
+            var query_iter = std.mem.splitScalar(u8, after_prefix, '?');
             if (query_iter.next()) |id_part| {
-                return try allocator.dupe(u8, id_part);
+                // Remove trailing slash if present
+                var end = id_part.len;
+                while (end > 0 and id_part[end - 1] == '/') {
+                    end -= 1;
+                }
+                const clean_id = id_part[0..end];
+
+                // The format could be:
+                // 1. "workspace-name/2a9f69455b3080c88458f7ff164a5455" (with slash and workspace)
+                // 2. "workspace-name-2a9f69455b3080c88458f7ff164a5455" (with hyphens)
+                // 3. "2a9f69455b3080c88458f7ff164a5455" (just ID)
+
+                // First, try splitting by slash (workspace/id format)
+                if (std.mem.indexOf(u8, clean_id, "/")) |slash_idx| {
+                    const potential_id = clean_id[slash_idx + 1 ..];
+                    if (potential_id.len == 32) {
+                        return try allocator.dupe(u8, potential_id);
+                    }
+                }
+
+                // Otherwise, look for the last segment that looks like a 32-char hex ID
+                var segments = std.mem.splitBackwardsScalar(u8, clean_id, '-');
+                while (segments.next()) |segment| {
+                    // Check if this could be a 32-char hex string (page ID)
+                    if (segment.len == 32) {
+                        var is_hex = true;
+                        for (segment) |c| {
+                            if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) {
+                                is_hex = false;
+                                break;
+                            }
+                        }
+                        if (is_hex) {
+                            return try allocator.dupe(u8, segment);
+                        }
+                    }
+                }
+
+                // If no 32-char segment found, return the whole thing
+                return try allocator.dupe(u8, clean_id);
             }
         }
         return NotionError.InvalidPageId;
