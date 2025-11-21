@@ -3,6 +3,44 @@ const Allocator = std.mem.Allocator;
 
 const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
 const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_HEADERS = 16;
+
+const HeaderBuilder = struct {
+    headers: [MAX_HEADERS]std.http.Header,
+    count: usize,
+    content_length_buffer: [32]u8,
+
+    fn init() HeaderBuilder {
+        return .{
+            .headers = undefined,
+            .count = 0,
+            .content_length_buffer = undefined,
+        };
+    }
+
+    fn add(self: *HeaderBuilder, name: []const u8, value: []const u8) !void {
+        if (self.count >= MAX_HEADERS) return HttpError.InvalidResponse;
+        self.headers[self.count] = .{ .name = name, .value = value };
+        self.count += 1;
+    }
+
+    fn addAuth(self: *HeaderBuilder, auth: []const u8) !void {
+        try self.add("Authorization", auth);
+    }
+
+    fn addContentType(self: *HeaderBuilder, content_type: []const u8) !void {
+        try self.add("content-type", content_type);
+    }
+
+    fn addContentLength(self: *HeaderBuilder, length: usize) !void {
+        const length_str = std.fmt.bufPrint(&self.content_length_buffer, "{d}", .{length}) catch return HttpError.InvalidResponse;
+        try self.add("content-length", length_str);
+    }
+
+    fn build(self: HeaderBuilder) []const std.http.Header {
+        return self.headers[0..self.count];
+    }
+};
 
 pub const HttpError = error{
     RequestFailed,
@@ -61,46 +99,33 @@ pub const HttpClient = struct {
     fn makeRequestWithHeaders(self: *HttpClient, method: std.http.Method, url: []const u8, auth_header: ?[]const u8, body: ?[]const u8, content_type: ?[]const u8, extra_headers: []const std.http.Header) !HttpResponse {
         const uri = std.Uri.parse(url) catch return HttpError.InvalidResponse;
 
-        // Create headers array with enough space for all headers
-        var headers_buffer: [10]std.http.Header = undefined;
-        var headers_count: usize = 0;
-        var content_length_buffer: [32]u8 = undefined;
+        var builder = HeaderBuilder.init();
 
+        // Add authentication header if provided
         if (auth_header) |auth| {
-            headers_buffer[headers_count] = .{ .name = "Authorization", .value = auth };
-            headers_count += 1;
+            try builder.addAuth(auth);
         }
-        headers_buffer[headers_count] = .{ .name = "accept", .value = "application/json" };
-        headers_count += 1;
-        headers_buffer[headers_count] = .{ .name = "accept-encoding", .value = "gzip, deflate" };
-        headers_count += 1;
-        headers_buffer[headers_count] = .{ .name = "user-agent", .value = "Zig HTTP Client" };
-        headers_count += 1;
+
+        // Add standard headers
+        try builder.add("accept", "application/json");
+        try builder.add("accept-encoding", "gzip, deflate");
+        try builder.add("user-agent", "Zig HTTP Client");
 
         // Add extra headers
         for (extra_headers) |header| {
-            if (headers_count >= headers_buffer.len) break;
-            headers_buffer[headers_count] = header;
-            headers_count += 1;
+            try builder.add(header.name, header.value);
         }
 
+        // Add body-related headers if body is present
         if (body) |b| {
             const ct = content_type orelse "application/json";
-            if (headers_count < headers_buffer.len) {
-                headers_buffer[headers_count] = .{ .name = "content-type", .value = ct };
-                headers_count += 1;
-            }
-
-            const content_length_str = std.fmt.bufPrint(content_length_buffer[0..], "{d}", .{b.len}) catch return HttpError.InvalidResponse;
-            if (headers_count < headers_buffer.len) {
-                headers_buffer[headers_count] = .{ .name = "content-length", .value = content_length_str };
-                headers_count += 1;
-            }
+            try builder.addContentType(ct);
+            try builder.addContentLength(b.len);
         }
 
         // Create request options
         const request_options = std.http.Client.RequestOptions{
-            .extra_headers = headers_buffer[0..headers_count],
+            .extra_headers = builder.build(),
             .keep_alive = true,
             .version = .@"HTTP/1.1",
         };
