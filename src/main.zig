@@ -86,36 +86,33 @@ fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
 }
 
 fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
-    // Remove any existing hyphens
-    var cleaned: std.ArrayList(u8) = .{};
-    defer cleaned.deinit(allocator);
+    // Remove any existing hyphens and spaces
+    var cleaned = std.ArrayList(u8).init(allocator);
+    defer cleaned.deinit();
 
     for (page_id) |c| {
         if (c != '-' and c != ' ') {
-            try cleaned.append(allocator, c);
+            try cleaned.append(c);
         }
     }
 
-    // Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     const clean_id = cleaned.items;
     if (clean_id.len != PAGE_ID_LENGTH) {
         return NotionError.InvalidPageId;
     }
 
-    var formatted: std.ArrayList(u8) = .{};
-    defer formatted.deinit(allocator);
-
-    try formatted.appendSlice(allocator, clean_id[0..8]);
-    try formatted.append(allocator, '-');
-    try formatted.appendSlice(allocator, clean_id[8..12]);
-    try formatted.append(allocator, '-');
-    try formatted.appendSlice(allocator, clean_id[12..16]);
-    try formatted.append(allocator, '-');
-    try formatted.appendSlice(allocator, clean_id[16..20]);
-    try formatted.append(allocator, '-');
-    try formatted.appendSlice(allocator, clean_id[20..32]);
-
-    return formatted.toOwnedSlice(allocator);
+    // Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+    return std.fmt.allocPrint(
+        allocator,
+        "{s}-{s}-{s}-{s}-{s}",
+        .{
+            clean_id[0..8],
+            clean_id[8..12],
+            clean_id[12..16],
+            clean_id[16..20],
+            clean_id[20..32],
+        },
+    );
 }
 
 fn fetchChildren(
