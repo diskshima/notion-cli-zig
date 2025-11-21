@@ -1,6 +1,9 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
+const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
+const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10MB
+
 pub const HttpError = error{
     RequestFailed,
     InvalidResponse,
@@ -120,7 +123,7 @@ pub const HttpClient = struct {
         const body_reader = response.reader(transfer_buffer[0..]);
 
         // Read the raw response body
-        const raw_body = body_reader.*.allocRemaining(self.allocator, std.Io.Limit.limited64(1024 * 1024)) catch return HttpError.InvalidResponse;
+        const raw_body = body_reader.*.allocRemaining(self.allocator, std.Io.Limit.limited64(MAX_RESPONSE_SIZE)) catch return HttpError.InvalidResponse;
 
         // Check if response is gzipped
         var response_body: []u8 = undefined;
@@ -160,7 +163,7 @@ pub const HttpClient = struct {
         // Read all decompressed data
         const decompressed = try decomp.reader.allocRemaining(
             self.allocator,
-            std.Io.Limit.limited64(10 * 1024 * 1024), // 10MB limit
+            std.Io.Limit.limited64(MAX_DECOMPRESSED_SIZE),
         );
 
         return decompressed;
