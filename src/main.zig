@@ -4,6 +4,10 @@ const http_client = @import("http_client.zig");
 const NOTION_API_BASE = "https://api.notion.com/v1";
 const NOTION_VERSION = "2022-06-28";
 
+const PAGE_ID_LENGTH = 32;
+const MAX_INDENT = 80;
+const INDENT_INCREMENT = 2;
+
 const NotionError = error{
     InvalidPageId,
     MissingApiToken,
@@ -46,7 +50,7 @@ fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
                 // First, try splitting by slash (workspace/id format)
                 if (std.mem.indexOf(u8, clean_id, "/")) |slash_idx| {
                     const potential_id = clean_id[slash_idx + 1 ..];
-                    if (potential_id.len == 32) {
+                    if (potential_id.len == PAGE_ID_LENGTH) {
                         return try allocator.dupe(u8, potential_id);
                     }
                 }
@@ -55,7 +59,7 @@ fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
                 var segments = std.mem.splitBackwardsScalar(u8, clean_id, '-');
                 while (segments.next()) |segment| {
                     // Check if this could be a 32-char hex string (page ID)
-                    if (segment.len == 32) {
+                    if (segment.len == PAGE_ID_LENGTH) {
                         var is_hex = true;
                         for (segment) |c| {
                             if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) {
@@ -93,7 +97,7 @@ fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
 
     // Format as UUID: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
     const clean_id = cleaned.items;
-    if (clean_id.len != 32) {
+    if (clean_id.len != PAGE_ID_LENGTH) {
         return NotionError.InvalidPageId;
     }
 
@@ -158,10 +162,10 @@ fn printBlockContent(
     indent: usize,
 ) !void {
     const writer = std.fs.File.stdout().deprecatedWriter();
-    const indent_str = " " ** 80;
+    const indent_str = " " ** MAX_INDENT;
 
     // Print indentation
-    if (indent < 80) {
+    if (indent < MAX_INDENT) {
         writer.print("{s}", .{indent_str[0..indent]}) catch {};
     }
 
@@ -258,7 +262,7 @@ fn printBlockContent(
                     if (root.object.get("results")) |results| {
                         if (results == .array) {
                             for (results.array.items) |child| {
-                                try printBlockContent(client, allocator, api_token, child, indent + 2);
+                                try printBlockContent(client, allocator, api_token, child, indent + INDENT_INCREMENT);
                             }
                         }
                     }
