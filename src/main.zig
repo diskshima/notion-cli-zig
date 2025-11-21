@@ -15,6 +15,16 @@ const NotionError = error{
     InvalidResponse,
 };
 
+fn isHexString(s: []const u8) bool {
+    for (s) |c| {
+        const is_hex_digit = (c >= '0' and c <= '9') or
+            (c >= 'a' and c <= 'f') or
+            (c >= 'A' and c <= 'F');
+        if (!is_hex_digit) return false;
+    }
+    return true;
+}
+
 fn printUsage(program_name: []const u8) void {
     const writer = std.fs.File.stderr().deprecatedWriter();
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
@@ -59,17 +69,8 @@ fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
                 var segments = std.mem.splitBackwardsScalar(u8, clean_id, '-');
                 while (segments.next()) |segment| {
                     // Check if this could be a 32-char hex string (page ID)
-                    if (segment.len == PAGE_ID_LENGTH) {
-                        var is_hex = true;
-                        for (segment) |c| {
-                            if (!((c >= '0' and c <= '9') or (c >= 'a' and c <= 'f') or (c >= 'A' and c <= 'F'))) {
-                                is_hex = false;
-                                break;
-                            }
-                        }
-                        if (is_hex) {
-                            return try allocator.dupe(u8, segment);
-                        }
+                    if (segment.len == PAGE_ID_LENGTH and isHexString(segment)) {
+                        return try allocator.dupe(u8, segment);
                     }
                 }
 
