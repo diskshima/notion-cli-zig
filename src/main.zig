@@ -20,6 +20,24 @@ const NotionConfig = struct {
 
 const notion_config = NotionConfig{};
 
+const BlockType = enum {
+    paragraph,
+    heading_1,
+    heading_2,
+    heading_3,
+    bulleted_list_item,
+    numbered_list_item,
+    code,
+    quote,
+    divider,
+    bookmark,
+    unsupported,
+
+    fn fromString(s: []const u8) BlockType {
+        return std.meta.stringToEnum(BlockType, s) orelse .unsupported;
+    }
+};
+
 const NotionError = error{
     InvalidPageId,
     MissingApiToken,
@@ -182,64 +200,77 @@ fn printBlockContent(
     }
 
     const block_obj = block.object;
-    const block_type = block_obj.get("type") orelse return;
+    const block_type_val = block_obj.get("type") orelse return;
 
-    if (block_type != .string) return;
-    const type_str = block_type.string;
+    if (block_type_val != .string) return;
+    const type_str = block_type_val.string;
+    const block_type = BlockType.fromString(type_str);
 
     // Handle different block types
-    if (std.mem.eql(u8, type_str, "paragraph")) {
-        if (block_obj.get("paragraph")) |para| {
-            printRichText(para.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "heading_1")) {
-        writer.print("# ", .{}) catch {};
-        if (block_obj.get("heading_1")) |heading| {
-            printRichText(heading.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "heading_2")) {
-        writer.print("## ", .{}) catch {};
-        if (block_obj.get("heading_2")) |heading| {
-            printRichText(heading.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "heading_3")) {
-        writer.print("### ", .{}) catch {};
-        if (block_obj.get("heading_3")) |heading| {
-            printRichText(heading.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "bulleted_list_item")) {
-        writer.print("- ", .{}) catch {};
-        if (block_obj.get("bulleted_list_item")) |item| {
-            printRichText(item.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "numbered_list_item")) {
-        writer.print("1. ", .{}) catch {};
-        if (block_obj.get("numbered_list_item")) |item| {
-            printRichText(item.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "code")) {
-        if (block_obj.get("code")) |code| {
-            writer.print("```\n", .{}) catch {};
-            printRichText(code.object.get("rich_text"));
-            writer.print("\n```", .{}) catch {};
-        }
-    } else if (std.mem.eql(u8, type_str, "quote")) {
-        writer.print("> ", .{}) catch {};
-        if (block_obj.get("quote")) |quote| {
-            printRichText(quote.object.get("rich_text"));
-        }
-    } else if (std.mem.eql(u8, type_str, "divider")) {
-        writer.print("--------------------", .{}) catch {};
-    } else if (std.mem.eql(u8, type_str, "bookmark")) {
-        if (block_obj.get("bookmark")) |bookmark| {
-             if (bookmark.object.get("url")) |url| {
-                 if (url == .string) {
-                     writer.print("[Bookmark: {s}]", .{url.string}) catch {};
-                 }
-             }
-        }
-    } else {
-        writer.print("[{s}]", .{type_str}) catch {};
+    switch (block_type) {
+        .paragraph => {
+            if (block_obj.get("paragraph")) |para| {
+                printRichText(para.object.get("rich_text"));
+            }
+        },
+        .heading_1 => {
+            writer.print("# ", .{}) catch {};
+            if (block_obj.get("heading_1")) |heading| {
+                printRichText(heading.object.get("rich_text"));
+            }
+        },
+        .heading_2 => {
+            writer.print("## ", .{}) catch {};
+            if (block_obj.get("heading_2")) |heading| {
+                printRichText(heading.object.get("rich_text"));
+            }
+        },
+        .heading_3 => {
+            writer.print("### ", .{}) catch {};
+            if (block_obj.get("heading_3")) |heading| {
+                printRichText(heading.object.get("rich_text"));
+            }
+        },
+        .bulleted_list_item => {
+            writer.print("- ", .{}) catch {};
+            if (block_obj.get("bulleted_list_item")) |item| {
+                printRichText(item.object.get("rich_text"));
+            }
+        },
+        .numbered_list_item => {
+            writer.print("1. ", .{}) catch {};
+            if (block_obj.get("numbered_list_item")) |item| {
+                printRichText(item.object.get("rich_text"));
+            }
+        },
+        .code => {
+            if (block_obj.get("code")) |code| {
+                writer.print("```\n", .{}) catch {};
+                printRichText(code.object.get("rich_text"));
+                writer.print("\n```", .{}) catch {};
+            }
+        },
+        .quote => {
+            writer.print("> ", .{}) catch {};
+            if (block_obj.get("quote")) |quote| {
+                printRichText(quote.object.get("rich_text"));
+            }
+        },
+        .divider => {
+            writer.print("--------------------", .{}) catch {};
+        },
+        .bookmark => {
+            if (block_obj.get("bookmark")) |bookmark| {
+                if (bookmark.object.get("url")) |url| {
+                    if (url == .string) {
+                        writer.print("[Bookmark: {s}]", .{url.string}) catch {};
+                    }
+                }
+            }
+        },
+        .unsupported => {
+            writer.print("[{s}]", .{type_str}) catch {};
+        },
     }
     writer.print("\n", .{}) catch {};
 
