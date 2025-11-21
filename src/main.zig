@@ -1,15 +1,14 @@
 const std = @import("std");
 const http_client = @import("http_client.zig");
+const block_formatter = @import("block_formatter.zig");
 
 const PAGE_ID_LENGTH = 32;
-const MAX_INDENT = 80;
-const INDENT_INCREMENT = 2;
 
 const NotionConfig = struct {
     api_base: []const u8 = "https://api.notion.com/v1",
     api_version: []const u8 = "2022-06-28",
 
-    fn buildBlockUrl(self: NotionConfig, allocator: std.mem.Allocator, block_id: []const u8) ![]const u8 {
+    pub fn buildBlockUrl(self: NotionConfig, allocator: std.mem.Allocator, block_id: []const u8) ![]const u8 {
         return std.fmt.allocPrint(
             allocator,
             "{s}/blocks/{s}/children",
@@ -19,24 +18,6 @@ const NotionConfig = struct {
 };
 
 const notion_config = NotionConfig{};
-
-const BlockType = enum {
-    paragraph,
-    heading_1,
-    heading_2,
-    heading_3,
-    bulleted_list_item,
-    numbered_list_item,
-    code,
-    quote,
-    divider,
-    bookmark,
-    unsupported,
-
-    fn fromString(s: []const u8) BlockType {
-        return std.meta.stringToEnum(BlockType, s) orelse .unsupported;
-    }
-};
 
 const NotionError = error{
     InvalidPageId,
@@ -168,145 +149,6 @@ fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
     );
 }
 
-fn fetchChildren(
-    client: *http_client.HttpClient,
-    allocator: std.mem.Allocator,
-    api_token: []const u8,
-    block_id: []const u8,
-) ![]const u8 {
-    const url = try notion_config.buildBlockUrl(allocator, block_id);
-    defer allocator.free(url);
-
-    // Prepare authorization header
-    const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_token});
-    defer allocator.free(auth_header);
-
-    // Prepare extra headers for Notion API
-    const extra_headers = [_]std.http.Header{
-        .{ .name = "Notion-Version", .value = notion_config.api_version },
-    };
-
-    // Make the GET request with custom headers
-    var response = try client.getWithHeaders(url, auth_header, &extra_headers);
-    defer response.deinit();
-
-    if (response.status_code != 200) {
-        printApiError(response.status_code, response.body);
-        return NotionError.ApiRequestFailed;
-    }
-
-    // Duplicate the body since response.deinit will free it
-    return try allocator.dupe(u8, response.body);
-}
-
-fn printBlockContent(
-    client: *http_client.HttpClient,
-    allocator: std.mem.Allocator,
-    api_token: []const u8,
-    block: std.json.Value,
-    indent: usize,
-) !void {
-    const writer = std.io.getStdOut().writer();
-    const indent_str = " " ** MAX_INDENT;
-
-    // Print indentation
-    if (indent < MAX_INDENT) {
-        writer.print("{s}", .{indent_str[0..indent]}) catch {};
-    }
-
-    const block_obj = block.object;
-    const block_type_val = block_obj.get("type") orelse return;
-
-    if (block_type_val != .string) return;
-    const type_str = block_type_val.string;
-    const block_type = BlockType.fromString(type_str);
-
-    // Handle different block types
-    switch (block_type) {
-        .paragraph => handleRichTextBlock(writer, block_obj, "paragraph", ""),
-        .heading_1 => handleRichTextBlock(writer, block_obj, "heading_1", "# "),
-        .heading_2 => handleRichTextBlock(writer, block_obj, "heading_2", "## "),
-        .heading_3 => handleRichTextBlock(writer, block_obj, "heading_3", "### "),
-        .bulleted_list_item => handleRichTextBlock(writer, block_obj, "bulleted_list_item", "- "),
-        .numbered_list_item => handleRichTextBlock(writer, block_obj, "numbered_list_item", "1. "),
-        .quote => handleRichTextBlock(writer, block_obj, "quote", "> "),
-        .code => handleCodeBlock(writer, block_obj),
-        .divider => writer.print("--------------------", .{}) catch {},
-        .bookmark => handleBookmarkBlock(writer, block_obj),
-        .unsupported => writer.print("[{s}]", .{type_str}) catch {},
-    }
-    writer.print("\n", .{}) catch {};
-
-    // Check for children
-    if (block_obj.get("has_children")) |has_children| {
-        if (has_children == .bool and has_children.bool) {
-            if (block_obj.get("id")) |id_val| {
-                if (id_val == .string) {
-                    const block_id = id_val.string;
-                    const response = try fetchChildren(client, allocator, api_token, block_id);
-                    defer allocator.free(response);
-
-                    const parsed = try std.json.parseFromSlice(
-                        std.json.Value,
-                        allocator,
-                        response,
-                        .{},
-                    );
-                    defer parsed.deinit();
-
-                    const root = parsed.value;
-                    if (root.object.get("results")) |results| {
-                        if (results == .array) {
-                            for (results.array.items) |child| {
-                                try printBlockContent(client, allocator, api_token, child, indent + INDENT_INCREMENT);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-fn handleRichTextBlock(writer: anytype, block_obj: std.json.ObjectMap, block_type_str: []const u8, prefix: []const u8) void {
-    writer.print("{s}", .{prefix}) catch {};
-    if (block_obj.get(block_type_str)) |block_data| {
-        printRichText(block_data.object.get("rich_text"));
-    }
-}
-
-fn handleCodeBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
-    if (block_obj.get("code")) |code| {
-        writer.print("```\n", .{}) catch {};
-        printRichText(code.object.get("rich_text"));
-        writer.print("\n```", .{}) catch {};
-    }
-}
-
-fn handleBookmarkBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
-    if (block_obj.get("bookmark")) |bookmark| {
-        if (bookmark.object.get("url")) |url| {
-            if (url == .string) {
-                writer.print("[Bookmark: {s}]", .{url.string}) catch {};
-            }
-        }
-    }
-}
-
-fn printRichText(rich_text_opt: ?std.json.Value) void {
-    const writer = std.io.getStdOut().writer();
-    const rich_text = rich_text_opt orelse return;
-    if (rich_text != .array) return;
-
-    for (rich_text.array.items) |text_item| {
-        if (text_item.object.get("plain_text")) |plain_text| {
-            if (plain_text == .string) {
-                writer.print("{s}", .{plain_text.string}) catch {};
-            }
-        }
-    }
-}
-
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -344,10 +186,28 @@ pub fn main() !void {
     defer client.deinit();
 
     // Fetch page blocks
-    const response = try fetchChildren(&client, allocator, api_token, formatted_id);
-    defer allocator.free(response);
+    const url = try notion_config.buildBlockUrl(allocator, formatted_id);
+    defer allocator.free(url);
 
-    if (response.len == 0) {
+    const auth_header = try std.fmt.allocPrint(allocator, "Bearer {s}", .{api_token});
+    defer allocator.free(auth_header);
+
+    const extra_headers = [_]std.http.Header{
+        .{ .name = "Notion-Version", .value = notion_config.api_version },
+    };
+
+    var response = try client.getWithHeaders(url, auth_header, &extra_headers);
+    defer response.deinit();
+
+    if (response.status_code != 200) {
+        printApiError(response.status_code, response.body);
+        return NotionError.ApiRequestFailed;
+    }
+
+    const response_body = try allocator.dupe(u8, response.body);
+    defer allocator.free(response_body);
+
+    if (response_body.len == 0) {
         writer.print("Error: Empty response from API\n", .{}) catch {};
         return NotionError.InvalidResponse;
     }
@@ -356,7 +216,7 @@ pub fn main() !void {
     const parsed = try std.json.parseFromSlice(
         std.json.Value,
         allocator,
-        response,
+        response_body,
         .{},
     );
     defer parsed.deinit();
@@ -365,7 +225,7 @@ pub fn main() !void {
     if (root.object.get("results")) |results| {
         if (results == .array) {
             for (results.array.items) |block| {
-                try printBlockContent(&client, allocator, api_token, block, 0);
+                try block_formatter.printBlockContent(&client, allocator, api_token, notion_config, block, 0);
             }
         }
     } else {
