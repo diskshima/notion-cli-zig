@@ -85,7 +85,10 @@ fn findPageIdInPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
 }
 
 fn printApiError(status_code: u16, response_body: []const u8) void {
-    const writer = std.fs.File.stderr().writer();
+    var buffer: [4096]u8 = undefined;
+    var writer_struct = std.fs.File.stderr().writer(&buffer);
+    const writer = &writer_struct.interface;
+
     writer.print("Error: Notion API request failed with status {}\n", .{status_code}) catch {};
 
     // Provide helpful messages for common status codes
@@ -99,16 +102,21 @@ fn printApiError(status_code: u16, response_body: []const u8) void {
     }
 
     writer.print("Response: {s}\n", .{response_body}) catch {};
+    writer.flush() catch {};
 }
 
 fn printUsage(program_name: []const u8) void {
-    const writer = std.fs.File.stderr().writer();
+    var buffer: [4096]u8 = undefined;
+    var writer_struct = std.fs.File.stderr().writer(&buffer);
+    const writer = &writer_struct.interface;
+
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
     writer.print("Environment Variables:\n", .{}) catch {};
     writer.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{}) catch {};
     writer.print("Examples:\n", .{}) catch {};
     writer.print("  {s} abc123def456\n", .{program_name}) catch {};
     writer.print("  {s} https://www.notion.so/My-Page-abc123def456\n", .{program_name}) catch {};
+    writer.flush() catch {};
 }
 
 fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
@@ -121,12 +129,12 @@ fn extractPageId(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
 
 fn formatPageId(allocator: std.mem.Allocator, page_id: []const u8) ![]const u8 {
     // Remove any existing hyphens and spaces
-    var cleaned = std.ArrayList(u8).init(allocator);
-    defer cleaned.deinit();
+    var cleaned = std.ArrayList(u8).empty;
+    defer cleaned.deinit(allocator);
 
     for (page_id) |c| {
         if (c != '-' and c != ' ') {
-            try cleaned.append(c);
+            try cleaned.append(allocator, c);
         }
     }
 
@@ -154,7 +162,9 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const writer = std.fs.File.stdout().writer();
+    var stdout_buffer: [4096]u8 = undefined;
+    var writer_struct = std.fs.File.stdout().writer(&stdout_buffer);
+    const writer = &writer_struct.interface;
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
@@ -169,6 +179,7 @@ pub fn main() !void {
     // Get API token from environment
     const api_token = std.process.getEnvVarOwned(allocator, "NOTION_API_TOKEN") catch {
         writer.print("Error: NOTION_API_TOKEN environment variable is not set\n\n", .{}) catch {};
+        writer.flush() catch {};
         printUsage(args[0]);
         return NotionError.MissingApiToken;
     };
@@ -209,6 +220,7 @@ pub fn main() !void {
 
     if (response_body.len == 0) {
         writer.print("Error: Empty response from API\n", .{}) catch {};
+        writer.flush() catch {};
         return NotionError.InvalidResponse;
     }
 
@@ -225,10 +237,11 @@ pub fn main() !void {
     if (root.object.get("results")) |results| {
         if (results == .array) {
             for (results.array.items) |block| {
-                try block_formatter.printBlockContent(&client, allocator, api_token, notion_config, block, 0);
+                try block_formatter.printBlockContent(&client, allocator, api_token, notion_config, block, 0, writer);
             }
         }
     } else {
         writer.print("No content found or invalid response format\n", .{}) catch {};
     }
+    writer.flush() catch {};
 }
