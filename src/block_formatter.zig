@@ -48,7 +48,7 @@ fn handleBookmarkBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
 }
 
 fn printRichText(rich_text_opt: ?std.json.Value) void {
-    const writer = std.io.getStdOut().writer();
+    const writer = std.fs.File.stdout().writer();
     const rich_text = rich_text_opt orelse return;
     if (rich_text != .array) return;
 
@@ -69,7 +69,7 @@ pub fn printBlockContent(
     block: std.json.Value,
     indent: usize,
 ) !void {
-    const writer = std.io.getStdOut().writer();
+    const writer = std.fs.File.stdout().writer();
     const indent_str = " " ** MAX_INDENT;
 
     // Print indentation
@@ -155,7 +155,7 @@ fn fetchChildren(
     defer response.deinit();
 
     if (response.status_code != 200) {
-        const writer = std.io.getStdErr().writer();
+        const writer = std.fs.File.stderr().writer();
         writer.print("Error: Notion API request failed with status {}\n", .{response.status_code}) catch {};
 
         // Provide helpful messages for common status codes
