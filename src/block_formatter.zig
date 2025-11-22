@@ -25,14 +25,14 @@ pub const BlockType = enum {
 fn handleRichTextBlock(writer: anytype, block_obj: std.json.ObjectMap, block_type_str: []const u8, prefix: []const u8) void {
     writer.print("{s}", .{prefix}) catch {};
     if (block_obj.get(block_type_str)) |block_data| {
-        printRichText(block_data.object.get("rich_text"));
+        printRichText(writer, block_data.object.get("rich_text"));
     }
 }
 
 fn handleCodeBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
     if (block_obj.get("code")) |code| {
         writer.print("```\n", .{}) catch {};
-        printRichText(code.object.get("rich_text"));
+        printRichText(writer, code.object.get("rich_text"));
         writer.print("\n```", .{}) catch {};
     }
 }
@@ -47,8 +47,7 @@ fn handleBookmarkBlock(writer: anytype, block_obj: std.json.ObjectMap) void {
     }
 }
 
-fn printRichText(rich_text_opt: ?std.json.Value) void {
-    const writer = std.fs.File.stdout().writer();
+fn printRichText(writer: anytype, rich_text_opt: ?std.json.Value) void {
     const rich_text = rich_text_opt orelse return;
     if (rich_text != .array) return;
 
@@ -68,8 +67,8 @@ pub fn printBlockContent(
     notion_config: anytype,
     block: std.json.Value,
     indent: usize,
+    writer: anytype,
 ) !void {
-    const writer = std.fs.File.stdout().writer();
     const indent_str = " " ** MAX_INDENT;
 
     // Print indentation
@@ -121,7 +120,7 @@ pub fn printBlockContent(
                     if (root.object.get("results")) |results| {
                         if (results == .array) {
                             for (results.array.items) |child| {
-                                try printBlockContent(client, allocator, api_token, notion_config, child, indent + INDENT_INCREMENT);
+                                try printBlockContent(client, allocator, api_token, notion_config, child, indent + INDENT_INCREMENT, writer);
                             }
                         }
                     }
@@ -155,7 +154,9 @@ fn fetchChildren(
     defer response.deinit();
 
     if (response.status_code != 200) {
-        const writer = std.fs.File.stderr().writer();
+        var stderr_buffer: [4096]u8 = undefined;
+        var writer_struct = std.fs.File.stderr().writer(&stderr_buffer);
+        const writer = &writer_struct.interface;
         writer.print("Error: Notion API request failed with status {}\n", .{response.status_code}) catch {};
 
         // Provide helpful messages for common status codes
@@ -169,6 +170,7 @@ fn fetchChildren(
         }
 
         writer.print("Response: {s}\n", .{response.body}) catch {};
+        writer.flush() catch {};
         return error.ApiRequestFailed;
     }
 
