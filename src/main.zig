@@ -85,7 +85,7 @@ fn findPageIdInPath(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
 }
 
 fn printApiError(status_code: u16, response_body: []const u8) void {
-    const writer = std.io.getStdErr().writer();
+    const writer = std.fs.File.stderr().writer();
     writer.print("Error: Notion API request failed with status {}\n", .{status_code}) catch {};
 
     // Provide helpful messages for common status codes
@@ -102,7 +102,7 @@ fn printApiError(status_code: u16, response_body: []const u8) void {
 }
 
 fn printUsage(program_name: []const u8) void {
-    const writer = std.io.getStdErr().writer();
+    const writer = std.fs.File.stderr().writer();
     writer.print("Usage: {s} <page-id-or-url>\n\n", .{program_name}) catch {};
     writer.print("Environment Variables:\n", .{}) catch {};
     writer.print("  NOTION_API_TOKEN - Your Notion integration token (required)\n\n", .{}) catch {};
@@ -154,7 +154,7 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const writer = std.io.getStdOut().writer();
+    const writer = std.fs.File.stdout().writer();
 
     const args = try std.process.argsAlloc(allocator);
     defer std.process.argsFree(allocator, args);
