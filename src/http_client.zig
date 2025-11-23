@@ -3,25 +3,25 @@ const Allocator = std.mem.Allocator;
 
 const MAX_RESPONSE_SIZE = 1024 * 1024; // 1MB
 const MAX_DECOMPRESSED_SIZE = 10 * 1024 * 1024; // 10MB
-const MAX_HEADERS = 16;
 
 const HeaderBuilder = struct {
-    headers: [MAX_HEADERS]std.http.Header,
-    count: usize,
+    headers: std.ArrayList(std.http.Header),
     content_length_buffer: [32]u8,
+    allocator: Allocator,
 
     fn init() HeaderBuilder {
+        const allocator = std.heap.page_allocator;
+        const header_array = std.ArrayList(std.http.Header).initCapacity(allocator, 8) catch @panic("Failed to initialize header array");
+
         return .{
-            .headers = undefined,
-            .count = 0,
+            .headers = header_array,
             .content_length_buffer = undefined,
+            .allocator = allocator,
         };
     }
 
     fn add(self: *HeaderBuilder, name: []const u8, value: []const u8) !void {
-        if (self.count >= MAX_HEADERS) return HttpError.InvalidResponse;
-        self.headers[self.count] = .{ .name = name, .value = value };
-        self.count += 1;
+        try self.headers.append(self.allocator, .{ .name = name, .value = value });
     }
 
     fn addAuth(self: *HeaderBuilder, auth: []const u8) !void {
@@ -38,7 +38,11 @@ const HeaderBuilder = struct {
     }
 
     fn build(self: HeaderBuilder) []const std.http.Header {
-        return self.headers[0..self.count];
+        return self.headers.items;
+    }
+
+    fn deinit(self: *HeaderBuilder) void {
+        self.headers.deinit();
     }
 };
 
